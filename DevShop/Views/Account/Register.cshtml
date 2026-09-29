@@ -1,0 +1,51 @@
+@model DevShop.Models.ViewModels.RegisterViewModel
+@{
+    ViewData["Title"] = "Регистрация";
+}
+
+<div class="row justify-content-center my-4">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-3 text-center">
+                <h4 class="h5 fw-bold mb-0">Регистрация</h4>
+            </div>
+            <div class="card-body p-4">
+                <form asp-action="Register" method="post">
+                    @Html.AntiForgeryToken()
+
+                    <div asp-validation-summary="ModelOnly" class="text-danger small mb-3"></div>
+
+                    <div class="mb-3">
+                        <label asp-for="Login" class="form-label">Логин</label>
+                        <input asp-for="Login" class="form-control" autocomplete="username" autofocus />
+                        <span asp-validation-for="Login" class="text-danger small"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="Password" class="form-label">Пароль</label>
+                        <input asp-for="Password" class="form-control" autocomplete="new-password" />
+                        <span asp-validation-for="Password" class="text-danger small"></span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label asp-for="ConfirmPassword" class="form-label">Повторите пароль</label>
+                        <input asp-for="ConfirmPassword" class="form-control" autocomplete="new-password" />
+                        <span asp-validation-for="ConfirmPassword" class="text-danger small"></span>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">
+                        Зарегистрироваться
+                    </button>
+                </form>
+            </div>
+            <div class="card-footer bg-light text-center py-3 small">
+                <span>Уже зарегистрированы?</span>
+                <a asp-action="Login" class="fw-semibold ms-1">Войти</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @await Html.PartialAsync("_ValidationScriptsPartial")
+}

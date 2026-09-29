@@ -1,0 +1,156 @@
+@model DevShop.Models.ViewModels.CatalogViewModel
+@{
+    ViewData["Title"] = "Каталог товаров";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h2 class="h4 fw-bold mb-1">Каталог товаров</h2>
+        <p class="text-muted small mb-0">Список доступного оборудования и комплектующих</p>
+    </div>
+    <span class="badge bg-secondary">На странице: @Model.Products.Count</span>
+</div>
+
+<!-- Search and Filter Form -->
+<div class="search-box">
+    <form method="get" asp-action="Index" class="row g-2 align-items-center">
+        <div class="col-md-5">
+            <input type="text" name="searchString" value="@Model.SearchString" class="form-control" placeholder="Поиск по названию..." />
+        </div>
+        <div class="col-md-3">
+            <select name="categoryId" class="form-select">
+                <option value="">Все категории</option>
+                @foreach (var cat in Model.Categories)
+                {
+                    <option value="@cat.IdCategories" selected="@(Model.CategoryId == cat.IdCategories ? "selected" : null)">
+                        @cat.CategoryName
+                    </option>
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <select name="sortBy" class="form-select">
+                <option value="" selected="@(string.IsNullOrEmpty(Model.SortBy) ? "selected" : null)">По названию (А-Я)</option>
+                <option value="name_desc" selected="@(Model.SortBy == "name_desc" ? "selected" : null)">По названию (Я-А)</option>
+                <option value="price_asc" selected="@(Model.SortBy == "price_asc" ? "selected" : null)">По цене (дешевле)</option>
+                <option value="price_desc" selected="@(Model.SortBy == "price_desc" ? "selected" : null)">По цене (дороже)</option>
+            </select>
+        </div>
+        <div class="col-md-1">
+            <button type="submit" class="btn btn-primary w-100">Найти</button>
+        </div>
+    </form>
+
+    @if (!string.IsNullOrWhiteSpace(Model.SearchString) || Model.CategoryId.HasValue || !string.IsNullOrWhiteSpace(Model.SortBy))
+    {
+        <div class="mt-2 pt-2 border-top d-flex justify-content-between align-items-center small">
+            <span class="text-muted">Применены фильтры</span>
+            <a asp-action="Index" class="text-danger text-decoration-none">Сбросить фильтры</a>
+        </div>
+    }
+</div>
+
+<!-- Products Grid -->
+@if (Model.Products.Any())
+{
+    <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4 mb-4">
+        @foreach (var item in Model.Products)
+        {
+            <div class="col">
+                <div class="product-card">
+                    <div class="product-card-img-wrapper">
+                        @if (!string.IsNullOrWhiteSpace(item.ImagePath))
+                        {
+                            <img src="@item.ImagePath" alt="@item.Name" class="product-card-img" />
+                        }
+                        else
+                        {
+                            <span class="text-muted small">Изображение отсутствует</span>
+                        }
+                    </div>
+                    <div class="product-card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="badge bg-light text-dark border">@item.CategoryName</span>
+                            @if (item.StockQuantity > 5)
+                            {
+                                <span class="badge bg-success">В наличии (@item.StockQuantity)</span>
+                            }
+                            else if (item.StockQuantity > 0)
+                            {
+                                <span class="badge bg-warning text-dark">Осталось: @item.StockQuantity</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-danger">Нет в наличии</span>
+                            }
+                        </div>
+                        <h5 class="product-card-title">@item.Name</h5>
+                        <p class="product-card-desc">@item.Description</p>
+                        <div class="d-flex justify-content-between align-items-center mt-auto pt-2 border-top">
+                            <span class="product-price">@item.Price.ToString("N0") ₽</span>
+                            @if (item.StockQuantity > 0)
+                            {
+                                <a asp-controller="Cart" asp-action="AddToCart" asp-route-productId="@item.Id" class="btn btn-primary btn-sm">
+                                    В корзину
+                                </a>
+                            }
+                            else
+                            {
+                                <button class="btn btn-secondary btn-sm" disabled>Закончился</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Pagination -->
+    @if (Model.TotalPages > 1)
+    {
+        <nav class="d-flex justify-content-center">
+            <ul class="pagination">
+                @if (Model.Page > 1)
+                {
+                    <li class="page-item">
+                        <a class="page-link" asp-action="Index" 
+                           asp-route-page="@(Model.Page - 1)" 
+                           asp-route-searchString="@Model.SearchString" 
+                           asp-route-categoryId="@Model.CategoryId" 
+                           asp-route-sortBy="@Model.SortBy">Назад</a>
+                    </li>
+                }
+
+                @for (int p = 1; p <= Model.TotalPages; p++)
+                {
+                    <li class="page-item @(p == Model.Page ? "active" : "")">
+                        <a class="page-link" asp-action="Index" 
+                           asp-route-page="@p" 
+                           asp-route-searchString="@Model.SearchString" 
+                           asp-route-categoryId="@Model.CategoryId" 
+                           asp-route-sortBy="@Model.SortBy">@p</a>
+                    </li>
+                }
+
+                @if (Model.Page < Model.TotalPages)
+                {
+                    <li class="page-item">
+                        <a class="page-link" asp-action="Index" 
+                           asp-route-page="@(Model.Page + 1)" 
+                           asp-route-searchString="@Model.SearchString" 
+                           asp-route-categoryId="@Model.CategoryId" 
+                           asp-route-sortBy="@Model.SortBy">Вперед</a>
+                    </li>
+                }
+            </ul>
+        </nav>
+    }
+}
+else
+{
+    <div class="alert alert-info text-center py-4">
+        <h5>Товары не найдены</h5>
+        <p class="mb-2">Попробуйте изменить параметры поиска или фильтрации.</p>
+        <a asp-action="Index" class="btn btn-outline-primary btn-sm">Показать все товары</a>
+    </div>
+}

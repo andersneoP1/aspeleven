@@ -1,0 +1,42 @@
+@model DevShop.Models.Cart
+@{
+    Layout = "_AdminLayout";
+    ViewData["Title"] = $"Корзина #{Model.IdCarts}";
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <div>
+                    <h5 class="admin-card-title">Корзина #@Model.IdCarts</h5>
+                    <div class="text-secondary small">Владелец: @(Model.User?.UserLogin ?? Model.UserId.ToString())</div>
+                </div>
+                <a asp-action="Index" class="btn-gh-secondary btn-sm">← Назад к корзинам</a>
+            </div>
+
+            <h6 class="fw-semibold text-white mb-2">Содержимое корзины:</h6>
+            <div class="table-responsive">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Товар</th>
+                            <th style="width: 120px;">Количество</th>
+                            <th style="width: 140px;">Цена за шт.</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in Model.CartItems)
+                        {
+                            <tr>
+                                <td class="fw-semibold text-white">@item.Product?.ProductName</td>
+                                <td class="font-monospace">@item.CartItemQuantity шт.</td>
+                                <td class="font-monospace fw-bold text-white">@item.Product?.ProductPrice.ToString("N0") ₽</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>

@@ -1,0 +1,46 @@
+@model DevShop.Models.Order
+@{
+    ViewData["Title"] = "Заказ успешно оформлен";
+}
+
+<div class="row justify-content-center my-4">
+    <div class="col-md-8">
+        <div class="card shadow-sm text-center p-4">
+            <h3 class="fw-bold text-success mb-2">Заказ №@Model.IdOrders успешно оформлен</h3>
+            <p class="text-muted mb-4">Данные сохранены в базе данных. Товары зарезервированы на складе.</p>
+
+            <div class="card text-start bg-light mb-4">
+                <div class="card-body">
+                    <div class="row g-2 mb-3">
+                        <div class="col-sm-6 text-muted">Номер заказа:</div>
+                        <div class="col-sm-6 fw-bold">№@Model.IdOrders</div>
+
+                        <div class="col-sm-6 text-muted">Дата:</div>
+                        <div class="col-sm-6">@Model.OrderDate?.ToString("dd.MM.yyyy HH:mm")</div>
+
+                        <div class="col-sm-6 text-muted">Статус:</div>
+                        <div class="col-sm-6"><span class="badge bg-primary">@Model.OrderStatus</span></div>
+
+                        <div class="col-sm-6 text-muted">Итоговая сумма:</div>
+                        <div class="col-sm-6 fw-bold text-primary">@Model.OrderTotalAmount.ToString("N0") ₽</div>
+                    </div>
+
+                    <h6 class="fw-bold mb-2">Состав заказа:</h6>
+                    <ul class="list-group list-group-flush">
+                        @foreach (var item in Model.OrderItems)
+                        {
+                            <li class="list-group-item bg-transparent d-flex justify-content-between px-0">
+                                <span>@item.Product.ProductName (x@item.OrderItemQuantity)</span>
+                                <span>@((item.OrderItemPriceAtPurchase * item.OrderItemQuantity).ToString("N0")) ₽</span>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            </div>
+
+            <div>
+                <a asp-controller="Products" asp-action="Index" class="btn btn-primary">Вернуться в каталог</a>
+            </div>
+        </div>
+    </div>
+</div>

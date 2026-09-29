@@ -1,0 +1,47 @@
+@model DevShop.Models.OrderItem
+@{
+    Layout = "_AdminLayout";
+    ViewData["Title"] = "Редактирование позиции заказа";
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <h5 class="admin-card-title">Редактирование позиции #@Model.IdOrderItems</h5>
+                <a asp-action="Index" class="btn-gh-secondary btn-sm">← Назад</a>
+            </div>
+
+            <form asp-action="Edit" method="post">
+                @Html.AntiForgeryToken()
+                <input type="hidden" asp-for="IdOrderItems" />
+
+                <div class="mb-3">
+                    <label asp-for="OrderId" class="form-label">Заказ</label>
+                    <select asp-for="OrderId" class="form-select" asp-items="ViewBag.OrderId"></select>
+                </div>
+
+                <div class="mb-3">
+                    <label asp-for="ProductId" class="form-label">Товар</label>
+                    <select asp-for="ProductId" class="form-select" asp-items="ViewBag.ProductId"></select>
+                </div>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-6">
+                        <label asp-for="OrderItemQuantity" class="form-label">Количество</label>
+                        <input asp-for="OrderItemQuantity" class="form-control font-monospace" min="1" />
+                    </div>
+                    <div class="col-md-6">
+                        <label asp-for="OrderItemPriceAtPurchase" class="form-label">Цена при покупке (₽)</label>
+                        <input asp-for="OrderItemPriceAtPurchase" class="form-control font-monospace" type="number" step="0.01" />
+                    </div>
+                </div>
+
+                <div class="d-flex justify-content-end gap-2">
+                    <a asp-action="Index" class="btn-gh-secondary">Отмена</a>
+                    <button type="submit" class="btn-gh-primary">Сохранить изменения</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

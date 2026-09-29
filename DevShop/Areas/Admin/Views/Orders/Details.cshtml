@@ -1,0 +1,66 @@
+@model DevShop.Models.Order
+@{
+    Layout = "_AdminLayout";
+    ViewData["Title"] = $"Детали заказа #{Model.IdOrders}";
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <div>
+                    <h5 class="admin-card-title">Заказ #@Model.IdOrders</h5>
+                    <div class="text-secondary small">Дата: @Model.OrderDate?.ToString("dd.MM.yyyy HH:mm")</div>
+                </div>
+                <div class="d-flex gap-2">
+                    <a asp-action="Edit" asp-route-id="@Model.IdOrders" class="btn btn-primary btn-sm">Изменить статус</a>
+                    <a asp-action="Index" class="btn btn-outline-secondary btn-sm">К заказам</a>
+                </div>
+            </div>
+
+            <div class="row g-3 mb-4">
+                <div class="col-sm-4">
+                    <div class="text-secondary small">Покупатель:</div>
+                    <div class="fw-semibold text-white">@(Model.User?.UserLogin ?? Model.UserId.ToString())</div>
+                </div>
+                <div class="col-sm-4">
+                    <div class="text-secondary small">Текущий статус:</div>
+                    <div>
+                        <span class="badge-gh badge-status-processing">@Model.OrderStatus</span>
+                    </div>
+                </div>
+                <div class="col-sm-4">
+                    <div class="text-secondary small">Итоговая сумма:</div>
+                    <div class="fw-bold font-monospace text-white h5 mb-0">@Model.OrderTotalAmount.ToString("N0") ₽</div>
+                </div>
+            </div>
+
+            <h6 class="fw-semibold text-white mb-2">Состав позиций заказа:</h6>
+            <div class="table-responsive">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Товар</th>
+                            <th style="width: 110px;">Количество</th>
+                            <th style="width: 140px;">Цена за шт.</th>
+                            <th style="width: 140px; text-align: right;">Сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var oi in Model.OrderItems)
+                        {
+                            <tr>
+                                <td class="fw-semibold text-white">@oi.Product?.ProductName</td>
+                                <td class="font-monospace">@oi.OrderItemQuantity шт.</td>
+                                <td class="font-monospace">@oi.OrderItemPriceAtPurchase.ToString("N0") ₽</td>
+                                <td class="font-monospace fw-bold text-white" style="text-align: right;">
+                                    @((oi.OrderItemPriceAtPurchase * oi.OrderItemQuantity).ToString("N0")) ₽
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>

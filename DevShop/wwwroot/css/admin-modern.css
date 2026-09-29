@@ -1,0 +1,36 @@
+/* ==========================================================================
+   DevStore Admin Styles
+   Простой стандартный стиль административной панели
+   ========================================================================== */
+
+#sidebar {
+    width: 240px;
+    min-height: 100vh;
+}
+
+.nav-link-admin {
+    display: block;
+    padding: 7px 12px;
+    color: #ced4da;
+    text-decoration: none;
+    border-radius: 4px;
+    margin-bottom: 2px;
+    font-size: 14px;
+}
+
+.nav-link-admin:hover {
+    background-color: #343a40;
+    color: #ffffff;
+    text-decoration: none;
+}
+
+.nav-link-admin.active {
+    background-color: #0d6efd;
+    color: #ffffff;
+    font-weight: 600;
+}
+
+#content {
+    min-height: 100vh;
+    background-color: #f8f9fa;
+}

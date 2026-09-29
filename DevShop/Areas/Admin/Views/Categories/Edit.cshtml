@@ -1,0 +1,43 @@
+@model DevShop.Models.Category
+@{
+    Layout = "_AdminLayout";
+    ViewData["Title"] = "Редактирование категории";
+}
+
+<div class="row justify-content-center">
+    <div class="col-lg-6">
+        <div class="admin-card">
+            <div class="admin-card-header">
+                <h5 class="admin-card-title">Редактирование категории #@Model.IdCategories</h5>
+                <a asp-action="Index" class="btn-gh-secondary btn-sm">← Назад</a>
+            </div>
+
+            <form asp-action="Edit" method="post">
+                @Html.AntiForgeryToken()
+                <input type="hidden" asp-for="IdCategories" />
+                <div asp-validation-summary="ModelOnly" class="text-danger small mb-3"></div>
+
+                <div class="mb-3">
+                    <label asp-for="CategoryName" class="form-label"></label>
+                    <input asp-for="CategoryName" class="form-control" />
+                    <span asp-validation-for="CategoryName" class="text-danger small"></span>
+                </div>
+
+                <div class="mb-4">
+                    <label asp-for="CategoryDescription" class="form-label"></label>
+                    <textarea asp-for="CategoryDescription" class="form-control" rows="3"></textarea>
+                    <span asp-validation-for="CategoryDescription" class="text-danger small"></span>
+                </div>
+
+                <div class="d-flex justify-content-end gap-2">
+                    <a asp-action="Index" class="btn-gh-secondary">Отмена</a>
+                    <button type="submit" class="btn-gh-primary">Сохранить изменения</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    @await Html.PartialAsync("_ValidationScriptsPartial")
+}
