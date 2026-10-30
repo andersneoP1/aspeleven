@@ -1,99 +1,117 @@
-# Практическая работа №8–9
-## Интернет-магазин оборудования разработчика на ASP.NET Core 8.0 MVC + REST Web API
+# Практическая работа №11
+## JWT-аутентификация, Policy-Based авторизация, CORS, Rate Limiting, AutoMapper и клиентский фронтенд на React в ASP.NET Core 8.0
 
-Полноценное веб-приложение интернет-магазина **DevHub Gear**, разработанное на платформе **ASP.NET Core 8.0** с использованием архитектурного шаблона **MVC (Model-View-Controller)**, ORM **Entity Framework Core 8.0**, Cookie-аутентификации, хэширования паролей BCrypt и документированного RESTful Web API (Swagger / OpenAPI).
+Полноценное веб-приложение интернет-магазина оборудования разработчика **DevHub Gear** на платформе **ASP.NET Core 8.0** со слоистой архитектурой (*Controllers / Services / Repositories / AutoMapper / EF Core*), расширенное комплексной системой безопасности: **JWT Bearer аутентификацией**, **Role-Based** и **Resource-Based политиками авторизации**, **CORS**, защитой от перебора через **Rate Limiting**, селективной документацией **Swagger/OpenAPI**, набором из 22 тестов на **xUnit** и отдельным клиентским приложением на **React (Vite + TypeScript)**.
 
-Дизайн интерфейса выполнен в аутентичной эстетике **GitHub Primer Dark** (slate canvas, crisp borders, monospace badges, octicons style).
+Интерфейс серверных Razor-представлений выполнен в аутентичной эстетике **GitHub Primer Dark** (slate canvas, crisp borders, monospace badges, octicons style).
 
 ---
 
 ## 🚀 Основной стек технологий
-* **Платформа:** .NET 8.0 (ASP.NET Core MVC)
-* **База данных:** MS SQL Server / LocalDB
-* **ORM:** Entity Framework Core 8.0 (SQL Server provider)
-* **Web API & Документация:** RESTful API, DTO, Mapper, Swashbuckle (Swagger UI / OpenAPI)
-* **Аутентификация:** Cookie-based Authentication
-* **Безопасность (хеширование паролей):** BCrypt.Net-Next
-* **Кэширование:** In-Memory Cache (`IMemoryCache`) для категорий каталога
-* **Фронтенд:** Razor Views (CSHTML), HTML5, CSS3, Bootstrap 5.3 + GitHub Dark Primer Theme
+* **Платформа:** .NET 8.0 (C# 12)
+* **Веб-фреймворк:** ASP.NET Core 8.0 (Web API + MVC / Razor Views)
+* **База данных:** MS SQL Server (LocalDB / Express) с поддержкой автоматического fallback на SQLite (`devshop.db`)
+* **ORM:** Entity Framework Core 8.0 (`Microsoft.EntityFrameworkCore.SqlServer`, `Sqlite`, `Tools`, `Design`)
+* **Слой доступа к данным:** Generic Repository (`IRepository<T>`) + специализированный `OrderRepository`
+* **Слой бизнес-логики:** Сервисы `ProductService`, `CategoryService`, `OrderService`, `AuthService`, `JwtTokenService` с унифицированными результатами `ServiceResult<T>` и `PagedResult<T>`
+* **Маппинг DTO:** `AutoMapper` 16.2.0 (`MappingProfile`) для всех доменных сущностей
+* **Аутентификация:** `Microsoft.AspNetCore.Authentication.JwtBearer` 8.0.0 (по умолчанию для API), Cookie Authentication (для Razor Views)
+* **Хеширование паролей:** `Microsoft.AspNetCore.Identity.PasswordHasher<User>`
+* **Ограничение запросов (Rate Limiting):** `Microsoft.AspNetCore.RateLimiting` (.NET 8 built-in)
+* **Документация API:** Swagger / OpenAPI (`Swashbuckle.AspNetCore` 10.2.3) с фильтром `AuthorizeCheckOperationFilter`
+* **Тестирование:** xUnit 2.9, `Microsoft.AspNetCore.Mvc.Testing` 8.0 (22 теста: маппинг, авторизация, интеграция API)
+* **Клиентский фронтенд:** React 18, TypeScript, Vite 5 (Origin: `http://localhost:5173`)
 
 ---
 
-## ⚙️ Функциональные возможности
+## ⚙️ Реализованный функционал
 
-### 1. Клиентская часть (Публичная витрина)
-* **Каталог оборудования:**
-  - Живой поиск по наименованию и техническим спецификациям;
-  - Фильтрация по категориям оборудования с бейджами;
-  - Сортировка по цене (возрастание / убывание) и алфавиту;
-  - Серверная пагинация (по 6 товаров на страницу);
-  - Кэширование справочника категорий в памяти на 10 минут.
-* **Корзина покупателя (`/Cart`):**
-  - Привязка корзины к учетной записи пользователя через Claims (`ClaimTypes.NameIdentifier`);
-  - Изменение количества единиц товара с валидацией остатка на складе;
-  - Мгновенный расчет итоговой стоимости.
-* **Транзакционное оформление заказа:**
-  - Создание заказа в рамках транзакции EF Core (`BeginTransactionAsync`);
-  - Автоматическое списание купленного количества товара со склада;
-  - Безопасная очистка корзины;
-  - Страница с деталями и составом оформленного заказа (`/Orders/CheckoutSuccess`).
-* **Аутентификация и профиль (`/Account`):**
-  - Регистрация нового разработчика с валидацией уникальности логина;
-  - Хэширование паролей с солью через BCrypt;
-  - Вход в систему с поддержкой «Запомнить меня» и безопасный выход.
+### 1. Архитектурное разделение и сервисный слой
+* **Паттерн Репозиторий:** `IRepository<T>` инкапсулирует базовые CRUD операции, `IOrderRepository` предоставляет методы для подгрузки связанных данных позиций заказов и пользователей.
+* **Сервисный слой:** Контроллеры API освобождены от прямой работы с БД и оперируют интерфейсами сервисов (`IProductService`, `ICategoryService`, `IOrderService`, `IAuthService`, `IJwtTokenService`).
+* **AutoMapper:** Конфигурация в `MappingProfile.cs` обеспечивает автоматическое сопоставление сущностей и DTO (включая условное частичное обновление полей Patch DTO через `opt.Condition`).
 
----
+### 2. Безопасность и хранение учетных записей (`PasswordHasher<T>`)
+* В модель `User` добавлено поле активности `public bool IsActive { get; set; } = true;` с маппингом на колонку `is_active` в БД.
+* Хеширование паролей реализовано через стандартный `Microsoft.AspNetCore.Identity.PasswordHasher<User>`.
+* **Автоматическая миграция тестовых пользователей**: При старте приложения в `Program.cs` учетные записи `admin` (`admin123`) и `user` (`user123`) автоматически обновляются валидными хешами `PasswordHasher<User>`.
 
-### 2. Административная панель (`Areas/Admin`)
-Доступна пользователям с системной ролью `Admin` (`[Authorize(Roles = "Admin")]`):
-* **Товары и оборудование:** Полный CRUD, управление остатком, ценами, спецификациями и загрузка фото (`IFormFile`) с сохранением в `wwwroot/images/`.
-* **Категории:** Управление справочником категорий с проверкой уникальности названий.
-* **Заказы:** Просмотр списка заказов, детальный состав позиций и изменение статусов (`Pending`, `Processing`, `Completed`, `Cancelled`).
-* **Корзины клиентов:** Мониторинг активных пользовательских корзин.
-* **Пользователи и роли:** Управление учетными записями, смена ролей и паролей.
+### 3. JWT Bearer аутентификация и разделение схем
+* Подключен `AddJwtBearer` со строгой валидацией токена (`Issuer`, `Audience`, `Lifetime`, `IssuerSigningKey`, `ClockSkew = TimeSpan.Zero`).
+* Схема `JwtBearerDefaults.AuthenticationScheme` установлена схемой по умолчанию для API.
+* При неавторизованном доступе к API возвращается строго статус `401 Unauthorized` с JSON-ответом (без редиректа 302 на страницу логина).
+* В `AuthApiController` (`/api/auth`) реализованы методы:
+  * `POST /api/auth/register` — регистрация нового пользователя (роль `User`, `IsActive = true`, возврат токена);
+  * `POST /api/auth/login` — вход по логину/паролю (под защитой Rate Limiter, возврат токена);
+  * `GET /api/auth/me` — получение профиля текущего пользователя по JWT-токену.
 
----
+### 4. Policy-Based авторизация (Role-based & Resource-based)
+* **Проверка активности**: В политики авторизации добавлена проверка claim `isActive == "true"`. Деактивированный пользователь получает `403 Forbidden` даже при валидном токене.
+* **Role-Based Policy (`RequireAdminRole`)**: Административные операции каталога и пользователей доступны только для роли `Admin`.
+* **Resource-Based Policy (`OwnerOrAdminPolicy`)**:
+  * Реализовано требование `SameOwnerOrAdminRequirement` и обработчики `OrderAuthorizationHandler`, `CartAuthorizationHandler`.
+  * Администратор имеет доступ к любым ресурсам, обычный пользователь — **только к своим собственным заказам и корзине** (`order.UserId == currentUserId`). При попытке доступа к чужому ресурсу возвращается `403 Forbidden`.
 
-### 3. RESTful Web API (Практическая работа №9)
-Контроллер `ProductsApiController` расположен по маршруту `/api/products` и изолирует базу данных через DTO:
-* `GET /api/products?page=1&pageSize=10` — список товаров с пагинацией (200 OK);
-* `GET /api/products/{id}` — получение товара по ID (200 OK / 404 NotFound);
-* `POST /api/products` — создание товара с валидацией DTO (201 Created с заголовком Location);
-* `PUT /api/products/{id}` — полное обновление товара (204 NoContent);
-* `PATCH /api/products/{id}` — частичное обновление переданных полей (204 NoContent);
-* `DELETE /api/products/{id}` — удаление товара по ID (204 NoContent).
+### 5. CORS и экспонирование заголовков
+* Настроена именованная политика `"FrontendCorsPolicy"` для origin фронтенда (`http://localhost:5173`, `http://localhost:3000`).
+* Экспонирован заголовок пагинации `X-Total-Count` (`WithExposedHeaders("X-Total-Count")`), позволяющий клиентам читать общее количество записей.
 
-Интерактивная документация и тестирование API доступны в браузере по адресу:  
-**`/swagger`**
+### 6. Rate Limiting на эндпоинте входа
+* Политика `"login-limiter"` с лимитом **5 запросов в минуту** с партиционированием по IP (`RemoteIpAddress`).
+* При превышении возвращается код `429 Too Many Requests` с информативным JSON-ответом.
+* Строгий порядок Middleware:
+  ```csharp
+  app.UseCors("FrontendCorsPolicy"); // Размещен ДО UseRateLimiter, чтобы 429 содержал CORS-заголовки
+  app.UseRateLimiter();
+  app.UseAuthentication();
+  app.UseAuthorization();
+  ```
 
----
+### 7. Swagger UI с динамическими замками
+* Подключен `AuthorizeCheckOperationFilter : IOperationFilter`.
+* Иконка замка отображается только у методов, защищенных атрибутом `[Authorize]`. Общедоступные эндпоинты отображаются без замков.
 
-## 🔑 Тестовые учетные записи
-
-При первом запуске база данных автоматически создается и заполняется тестовыми данными:
-
-| Роль | Логин | Пароль | Права доступа |
-| :--- | :--- | :--- | :--- |
-| **Администратор** | `admin` | `admin123` | Полный доступ к панели `/Admin`, CRUD товаров, категорий, заказов |
-| **Пользователь** | `developer` | `dev123` | Витрина, корзина, оформление заказов |
+### 8. Отдельный клиентский React-фронтенд (`client-app`)
+* SPA-приложение на React (Vite + TypeScript) с интерактивным тестовым пультом (Testing Sandbox) для демонстрации 6 сценариев:
+  1. **Тест 1 (200 OK — свой ресурс)**: Запрос `GET /api/auth/me`.
+  2. **Тест 2 (403 Forbidden — чужой ресурс)**: Запрос `GET /api/orders/9999` через Resource-based policy.
+  3. **Тест 3 (403 Forbidden — Role-based policy)**: Запрос `GET /api/users` (403 для `user`, 200 для `admin`).
+  4. **Тест 4 (401 Unauthorized)**: Запрос к защищенному эндпоинту без токена.
+  5. **Тест 5 (429 Too Many Requests)**: Серия из 6 запросов на вход для демонстрации Rate Limiter.
+  6. **Тест 6 (CORS + Exposed Header)**: Запрос `GET /api/products` с чтением заголовка `X-Total-Count`.
 
 ---
 
-## 🛠️ Запуск проекта
+## 🧪 Автоматизированное тестирование (`DevShop.Tests`)
 
-1. Клонируйте репозиторий или откройте решение `pr9DevShop.sln` в **Visual Studio 2022** / **JetBrains Rider** / **VS Code**.
-2. Убедитесь, что установлен **.NET 8.0 SDK**.
-3. Проверьте строку подключения в `appsettings.json`:
-   ```json
-   "ConnectionStrings": {
-     "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=DevShopDB;Trusted_Connection=True;MultipleActiveResultSets=true;TrustServerCertificate=True"
-   }
-   ```
-4. Запустите проект (клавиша F5 в Visual Studio) или через командную строку:
-   ```bash
-   dotnet run --project DevShop/DevShop.csproj
-   ```
-5. Перейдите в браузере:
-   * **Магазин:** `https://localhost:7198` (или `http://localhost:5214`)
-   * **Swagger UI:** `https://localhost:7198/swagger`
-   * **Админка:** `https://localhost:7198/Admin/Products` (требуется вход под `admin`)
+Проект содержит **22 автоматизированных теста** на фреймворке **xUnit**, покрывающих 100% критических сценариев:
+1. `MappingProfileTests` (10 тестов): тестирование всех проекций AutoMapper.
+2. `AuthAndPolicyTests` (6 тестов): модульные тесты хеширования, клеймов токена и политик доступа.
+3. `ApiEndpointIntegrationTests` (6 тестов): сквозные интеграционные тесты с реальным веб-сервером через `WebApplicationFactory<Program>`.
+
+Запуск тестов:
+```powershell
+dotnet test pr11ASP_Af.sln
+```
+
+---
+
+## 🚀 Инструкция по запуску
+
+### Запуск серверной части (Web API & MVC)
+```powershell
+dotnet run --project DevShop/DevShop.csproj
+```
+- Витрина магазина: `http://localhost:5214/`
+- Документация Swagger UI: `http://localhost:5214/swagger`
+
+### Запуск клиентского приложения React (Sandbox)
+```powershell
+cd client-app
+npm run dev
+```
+- Клиентский пульт: `http://localhost:5173/`
+
+### Тестовые учетные записи:
+* **Администратор:** логин `admin`, пароль `admin123`
+* **Пользователь:** логин `user`, пароль `user123`

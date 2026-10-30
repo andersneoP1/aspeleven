@@ -4,29 +4,32 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using DevShop.Models;
 using DevShop.Models.ViewModels;
-using BCrypt.Net;
 
 namespace DevShop.Controllers;
 
 public class AccountController : Controller
 {
     private readonly ShopDbContext _context;
+    private readonly IPasswordHasher<User> _passwordHasher;
 
-    public AccountController(ShopDbContext context)
+    public AccountController(ShopDbContext context, IPasswordHasher<User> passwordHasher)
     {
         _context = context;
+        _passwordHasher = passwordHasher;
     }
 
     [HttpGet]
     public IActionResult Login(string? returnUrl = null)
     {
-        if (User.Identity?.IsAuthenticated == true)
+        if (User.Identity != null && User.Identity.IsAuthenticated)
         {
-            return RedirectToAction("Index", "Products");
+            return RedirectToAction("Index", "Home");
         }
 
         ViewData["ReturnUrl"] = returnUrl;
@@ -47,13 +50,34 @@ public class AccountController : Controller
 
             if (user != null)
             {
-                if (BCrypt.Net.BCrypt.Verify(model.Password, user.UserPasswordHash))
+                if (!user.IsActive)
+                {
+                    ModelState.AddModelError(string.Empty, "Учетная запись деактивирована администратором.");
+                    return View(model);
+                }
+
+                bool isPasswordValid = false;
+                try
+                {
+                    isPasswordValid = _passwordHasher.VerifyHashedPassword(user, user.UserPasswordHash, model.Password) != PasswordVerificationResult.Failed;
+                }
+                catch
+                {
+                    try
+                    {
+                        isPasswordValid = BCrypt.Net.BCrypt.Verify(model.Password, user.UserPasswordHash);
+                    }
+                    catch { }
+                }
+
+                if (isPasswordValid)
                 {
                     var claims = new List<Claim>
                     {
                         new Claim(ClaimTypes.NameIdentifier, user.IdUsers.ToString()),
                         new Claim(ClaimTypes.Name, user.UserLogin),
-                        new Claim(ClaimTypes.Role, user.Role?.RoleName ?? "User")
+                        new Claim(ClaimTypes.Role, user.Role?.RoleName ?? "User"),
+                        new Claim("isActive", user.IsActive.ToString().ToLower())
                     };
 
                     var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
@@ -61,7 +85,7 @@ public class AccountController : Controller
                     var authProperties = new AuthenticationProperties
                     {
                         IsPersistent = model.RememberMe,
-                        ExpiresUtc = DateTimeOffset.UtcNow.AddDays(7)
+                        ExpiresUtc = model.RememberMe ? DateTimeOffset.UtcNow.AddDays(7) : (DateTimeOffset?)null
                     };
 
                     await HttpContext.SignInAsync(
@@ -77,7 +101,8 @@ public class AccountController : Controller
                     return RedirectToAction("Index", "Products");
                 }
             }
-            ModelState.AddModelError(string.Empty, "Неверный логин или пароль разработчика.");
+
+            ModelState.AddModelError(string.Empty, "Неверный логин или пароль.");
         }
 
         return View(model);
@@ -86,7 +111,7 @@ public class AccountController : Controller
     [HttpGet]
     public IActionResult Register()
     {
-        if (User.Identity?.IsAuthenticated == true)
+        if (User.Identity != null && User.Identity.IsAuthenticated)
         {
             return RedirectToAction("Index", "Products");
         }
@@ -100,38 +125,44 @@ public class AccountController : Controller
     {
         if (ModelState.IsValid)
         {
-            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.UserLogin.ToLower() == model.Login.ToLower());
-            if (existingUser != null)
+            var existingUser = await _context.Users.AnyAsync(u => u.UserLogin == model.Login);
+            if (existingUser)
             {
-                ModelState.AddModelError("Login", "Данный логин уже занят другим разработчиком.");
+                ModelState.AddModelError("Login", "Пользователь с таким логином уже существует.");
                 return View(model);
             }
 
             var defaultRole = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == "User");
             int roleId = defaultRole?.IdRoles ?? 1;
 
-            var user = new User
+            var newUser = new User
             {
                 UserLogin = model.Login,
-                UserPasswordHash = BCrypt.Net.BCrypt.HashPassword(model.Password),
                 RoleId = roleId,
-                UserCreatedAt = DateTime.Now
+                IsActive = true,
+                UserCreatedAt = DateTime.UtcNow,
+                UserPasswordHash = string.Empty
             };
+            newUser.UserPasswordHash = _passwordHasher.HashPassword(newUser, model.Password);
 
-            _context.Users.Add(user);
+            _context.Users.Add(newUser);
             await _context.SaveChangesAsync();
 
-            // Создаем корзину для нового пользователя
-            var cart = new Cart
+            var claims = new List<Claim>
             {
-                UserId = user.IdUsers,
-                CartCreatedAt = DateTime.Now
+                new Claim(ClaimTypes.NameIdentifier, newUser.IdUsers.ToString()),
+                new Claim(ClaimTypes.Name, newUser.UserLogin),
+                new Claim(ClaimTypes.Role, defaultRole?.RoleName ?? "User"),
+                new Claim("isActive", "true")
             };
-            _context.Carts.Add(cart);
-            await _context.SaveChangesAsync();
 
-            TempData["Success"] = "Учетная запись успешно зарегистрирована! Теперь выполните вход.";
-            return RedirectToAction("Login");
+            var claimsIdentity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+
+            await HttpContext.SignInAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                new ClaimsPrincipal(claimsIdentity));
+
+            return RedirectToAction("Index", "Products");
         }
 
         return View(model);

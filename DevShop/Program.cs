@@ -3,35 +3,82 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.OpenApi.Models;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi;
+
+using DevShop.Authorization;
+using DevShop.Mapping;
 using DevShop.Models;
+using DevShop.Repositories;
+using DevShop.Services;
+using DevShop.Swagger;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Подключение сервисов MVC и Razor
+// 1. Подключение сервисов MVC и Razor
 builder.Services.AddControllersWithViews();
 builder.Services.AddRazorPages();
 
-// Swagger / OpenAPI для практической работы №9
+// 2. Swagger / OpenAPI с поддержкой JWT Bearer и динамических замочков
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(c =>
+builder.Services.AddSwaggerGen(options =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo
+    options.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "DevHub Gear REST API",
+        Title = "DevShop REST API",
         Version = "v1",
-        Description = "Полноценный RESTful Web API для управления каталогом оборудования разработчика (Практическая работа №9)"
+        Description = "ASP.NET Core 8.0 Web API интернет-магазина оборудования разработчика с JWT, Policy-based авторизацией, CORS и Rate Limiting"
     });
+
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Description = "JWT Authorization заголовок с использованием схемы Bearer. Пример: \"Authorization: Bearer {token}\"",
+        Name = "Authorization",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer",
+        BearerFormat = "JWT"
+    });
+
+    // Динамический замочек только для [Authorize] методов
+    options.OperationFilter<AuthorizeCheckOperationFilter>();
 });
 
-// Настройка контекста Entity Framework Core с поддержкой MS SQL Server и автоматическим SQLite-fallback
+// 3. AutoMapper
+builder.Services.AddAutoMapper(cfg => cfg.AddProfile<MappingProfile>());
+
+// 4. Слой репозиториев (Scoped)
+builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
+builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+
+// 5. Слой сервисов (Scoped)
+builder.Services.AddScoped<IProductService, ProductService>();
+builder.Services.AddScoped<ICategoryService, CategoryService>();
+builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+
+// 6. Хеширование паролей PasswordHasher<User>
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+
+// 7. Resource-Based Authorization Handlers
+builder.Services.AddSingleton<IAuthorizationHandler, OrderAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, CartAuthorizationHandler>();
+
+// 8. Настройка контекста Entity Framework Core с поддержкой MS SQL Server и автоматическим SQLite-fallback
 var sqlServerConnection = builder.Configuration.GetConnectionString("DefaultConnection");
 bool useSqlServer = false;
 
@@ -58,22 +105,138 @@ if (useSqlServer)
 }
 else
 {
-    Console.WriteLine("[DevShop Database]: SQL Server не обнаружен. Автоматически используется локальная база данных SQLite (devshop.db).");
     builder.Services.AddDbContext<ShopDbContext>(options =>
         options.UseSqlite("Data Source=devshop.db"));
 }
 
-// Настройка аутентификации на основе Cookie
-builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-    .AddCookie(options =>
+// 9. CORS: Чтение списка разрешенных origin фронтенда из appsettings.json
+var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() 
+                     ?? new[] { "http://localhost:5173", "http://localhost:3000" };
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FrontendCorsPolicy", policy =>
     {
-        options.LoginPath = "/Account/Login";
-        options.AccessDeniedPath = "/Account/AccessDenied";
-        options.ExpireTimeSpan = TimeSpan.FromDays(7);
-        options.SlidingExpiration = true;
+        policy.WithOrigins(allowedOrigins)
+              .AllowAnyHeader()
+              .AllowAnyMethod()
+              .WithExposedHeaders("X-Total-Count");
+    });
+});
+
+// 10. Rate Limiting с партиционированием по IP-адресу клиента на эндпоинте входа (5 запросов в минуту)
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (context, token) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsync(
+            "{\"message\":\"Превышен лимит запросов на вход (Rate Limit: 5 запросов в минуту). Повторите попытку позже.\",\"statusCode\":429}",
+            cancellationToken: token);
+    };
+
+    options.AddPolicy("login-limiter", httpContext =>
+    {
+        var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: clientIp,
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            });
+    });
+});
+
+// 11. Аутентификация: JWT Bearer (по умолчанию для API) + Cookie (для MVC)
+var jwtKey = builder.Configuration["Jwt:Key"] 
+             ?? "VeryStrongAndSecretKeyForJwtAuthenticationDevShop2026!MustBe32BytesOrLonger";
+var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "DevShopApiServer";
+var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "DevShopApiClient";
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(JwtBearerDefaults.AuthenticationScheme, options =>
+{
+    options.RequireHttpsMetadata = false;
+    options.SaveToken = true;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = true,
+        ValidIssuer = jwtIssuer,
+        ValidateAudience = true,
+        ValidAudience = jwtAudience,
+        ValidateLifetime = true,
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+        ClockSkew = TimeSpan.Zero
+    };
+
+    // Строго возвращаем JSON со статусами 401 и 403 (без 302 Redirect)
+    options.Events = new JwtBearerEvents
+    {
+        OnChallenge = context =>
+        {
+            context.HandleResponse();
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            context.Response.ContentType = "application/json";
+            return context.Response.WriteAsync("{\"message\":\"Требуется валидный JWT access-токен (401 Unauthorized)\",\"statusCode\":401}");
+        },
+        OnForbidden = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            return context.Response.WriteAsync("{\"message\":\"Недостаточно прав для доступа к ресурсу (403 Forbidden)\",\"statusCode\":403}");
+        }
+    };
+})
+.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
+{
+    options.LoginPath = "/Account/Login";
+    options.AccessDeniedPath = "/Account/AccessDenied";
+    options.ExpireTimeSpan = TimeSpan.FromDays(7);
+    options.SlidingExpiration = true;
+});
+
+// 12. Политики авторизации (Role-Based и Resource-Based)
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("RequireActiveUser", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx =>
+        {
+            var isActiveClaim = ctx.User.FindFirst("isActive")?.Value;
+            return string.Equals(isActiveClaim, "true", StringComparison.OrdinalIgnoreCase);
+        });
     });
 
-// Кэширование в оперативной памяти и сессии
+    options.AddPolicy("RequireAdminRole", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireRole("Admin");
+        policy.RequireAssertion(ctx =>
+        {
+            var isActiveClaim = ctx.User.FindFirst("isActive")?.Value;
+            return string.Equals(isActiveClaim, "true", StringComparison.OrdinalIgnoreCase);
+        });
+    });
+
+    options.AddPolicy("OwnerOrAdminPolicy", policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.Requirements.Add(new SameOwnerOrAdminRequirement());
+    });
+});
+
+// 13. Кэширование и сессии
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddMemoryCache();
 builder.Services.AddSession(options =>
@@ -82,187 +245,99 @@ builder.Services.AddSession(options =>
     options.IdleTimeout = TimeSpan.FromMinutes(30);
 });
 
-// Принудительное включение поддержки всех символов Unicode для Razor
+// UTF-8 для Razor
 builder.Services.AddSingleton(System.Text.Encodings.Web.HtmlEncoder.Create(System.Text.Unicode.UnicodeRanges.All));
 
 var app = builder.Build();
 
-// Инициализация базы данных и сидинг демонстрационных данных
+// 14. Инициализация базы данных, миграция структуры и сидинг пользователей
 using (var scope = app.Services.CreateScope())
 {
     var context = scope.ServiceProvider.GetRequiredService<ShopDbContext>();
-    
+    var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
+
     try
     {
-        // Создание базы данных и таблиц, если они еще не существуют
         context.Database.EnsureCreated();
 
-        // 1. Гарантируем системные роли
-        if (!context.Roles.Any(r => r.RoleName == "Admin"))
+        if (context.Database.IsSqlServer())
         {
-            context.Roles.Add(new Role { RoleName = "Admin" });
-            context.SaveChanges();
+            try
+            {
+                context.Database.ExecuteSqlRaw("IF COL_LENGTH('Users', 'is_active') IS NULL ALTER TABLE Users ADD is_active bit NOT NULL DEFAULT 1");
+            }
+            catch { }
         }
 
+        // Гарантируем роли "User" и "Admin"
         if (!context.Roles.Any(r => r.RoleName == "User"))
         {
             context.Roles.Add(new Role { RoleName = "User" });
             context.SaveChanges();
         }
 
+        if (!context.Roles.Any(r => r.RoleName == "Admin"))
+        {
+            context.Roles.Add(new Role { RoleName = "Admin" });
+            context.SaveChanges();
+        }
+
         var adminRole = context.Roles.First(r => r.RoleName == "Admin");
         var userRole = context.Roles.First(r => r.RoleName == "User");
 
-        // 2. Гарантируем учетную запись администратора (admin / admin123)
+        // Сидирование / миграция хеша PasswordHasher<User> для admin (admin123)
         var adminUser = context.Users.FirstOrDefault(u => u.UserLogin == "admin");
         if (adminUser == null)
         {
             adminUser = new User
             {
                 UserLogin = "admin",
-                UserPasswordHash = BCrypt.Net.BCrypt.HashPassword("admin123"),
                 RoleId = adminRole.IdRoles,
-                UserCreatedAt = DateTime.Now
+                IsActive = true,
+                UserCreatedAt = DateTime.UtcNow,
+                UserPasswordHash = string.Empty
             };
+            adminUser.UserPasswordHash = passwordHasher.HashPassword(adminUser, "admin123");
             context.Users.Add(adminUser);
-            context.SaveChanges();
-
-            context.Carts.Add(new Cart { UserId = adminUser.IdUsers, CartCreatedAt = DateTime.Now });
-            context.SaveChanges();
+        }
+        else
+        {
+            adminUser.UserPasswordHash = passwordHasher.HashPassword(adminUser, "admin123");
+            adminUser.RoleId = adminRole.IdRoles;
+            adminUser.IsActive = true;
         }
 
-        // 3. Гарантируем тестового пользователя (developer / dev123)
-        var devUser = context.Users.FirstOrDefault(u => u.UserLogin == "developer");
-        if (devUser == null)
+        // Сидирование / миграция хеша PasswordHasher<User> для user (user123)
+        var regularUser = context.Users.FirstOrDefault(u => u.UserLogin == "user");
+        if (regularUser == null)
         {
-            devUser = new User
+            regularUser = new User
             {
-                UserLogin = "developer",
-                UserPasswordHash = BCrypt.Net.BCrypt.HashPassword("dev123"),
+                UserLogin = "user",
                 RoleId = userRole.IdRoles,
-                UserCreatedAt = DateTime.Now
+                IsActive = true,
+                UserCreatedAt = DateTime.UtcNow,
+                UserPasswordHash = string.Empty
             };
-            context.Users.Add(devUser);
-            context.SaveChanges();
-
-            context.Carts.Add(new Cart { UserId = devUser.IdUsers, CartCreatedAt = DateTime.Now });
-            context.SaveChanges();
+            regularUser.UserPasswordHash = passwordHasher.HashPassword(regularUser, "user123");
+            context.Users.Add(regularUser);
         }
-
-        // 4. Гарантируем категории оборудования DevHub
-        if (!context.Categories.Any())
+        else
         {
-            var categories = new List<Category>
-            {
-                new Category { CategoryName = "Механические клавиатуры", CategoryDescription = "Кастомные клавиатуры с поддержкой QMK/VIA, горячей заменой свитчей и алюминиевым корпусом." },
-                new Category { CategoryName = "Мониторы и экраны", CategoryDescription = "Профессиональные 4K/5K IPS мониторы с USB-C Power Delivery для мультимониторных рабочих станций." },
-                new Category { CategoryName = "Микрокомпьютеры и IoT", CategoryDescription = "Одноплатные компьютеры, микроконтроллеры и платы разработки для embedded-инженеров." },
-                new Category { CategoryName = "Студийное аудио", CategoryDescription = "Микрофоны студийного качества, звуковые карты и закрытые наушники для созвонов и код-ревью." },
-                new Category { CategoryName = "Сетевое оборудование", CategoryDescription = "Управляемые коммутаторы, маршрутизаторы и роутеры с поддержкой PoE и Wi-Fi 6/7." },
-                new Category { CategoryName = "Эргономика и аксессуары", CategoryDescription = "Кронштейны для мониторов, макропады, кабели в оплетке и подставки для правильной осанки." }
-            };
-
-            context.Categories.AddRange(categories);
-            context.SaveChanges();
+            regularUser.UserPasswordHash = passwordHasher.HashPassword(regularUser, "user123");
+            regularUser.RoleId = userRole.IdRoles;
+            regularUser.IsActive = true;
         }
 
-        // 5. Гарантируем первоначальный каталог товаров
-        if (!context.Products.Any())
-        {
-            var catKeyboards = context.Categories.First(c => c.CategoryName == "Механические клавиатуры");
-            var catMonitors = context.Categories.First(c => c.CategoryName == "Мониторы и экраны");
-            var catIoT = context.Categories.First(c => c.CategoryName == "Микрокомпьютеры и IoT");
-            var catAudio = context.Categories.First(c => c.CategoryName == "Студийное аудио");
-            var catNetwork = context.Categories.First(c => c.CategoryName == "Сетевое оборудование");
-            var catErgo = context.Categories.First(c => c.CategoryName == "Эргономика и аксессуары");
-
-            var products = new List<Product>
-            {
-                new Product
-                {
-                    ProductName = "Keychron Q1 Pro Wireless (Red Switches)",
-                    ProductDescription = "Премиальная кастомная клавиатура на алюминиевом шасси с поддержкой Bluetooth 5.1 и проводного Type-C подключения. Совместима с QMK/VIA для переназначения макросов.",
-                    ProductPrice = 18990.00m,
-                    ProductStockQuantity = 12,
-                    CategoryId = catKeyboards.IdCategories,
-                    ProductImageUrl = "https://images.unsplash.com/photo-1587829741301-dc798b83add3?w=800&auto=format&fit=crop&q=80"
-                },
-                new Product
-                {
-                    ProductName = "Dell UltraSharp 32 4K USB-C Hub (U3223QE)",
-                    ProductDescription = "31.5-дюймовый 4K IPS Black монитор с контрастностью 2000:1, охватом 100% sRGB и 98% DCI-P3. Встроенный сетевой порт RJ45 и зарядка ноутбука через USB-C 90W.",
-                    ProductPrice = 84500.00m,
-                    ProductStockQuantity = 7,
-                    CategoryId = catMonitors.IdCategories,
-                    ProductImageUrl = "https://images.unsplash.com/photo-1527443224154-c4a3942d3acf?w=800&auto=format&fit=crop&q=80"
-                },
-                new Product
-                {
-                    ProductName = "Raspberry Pi 5 8GB RAM Starter Kit",
-                    ProductDescription = "Четырехъядерный 64-битный процессор Arm Cortex-A76 2.4 ГГц, два выхода micro-HDMI 4Kp60, скоростной интерфейс PCIe 2.0 для подключения NVMe SSD накопителей.",
-                    ProductPrice = 12400.00m,
-                    ProductStockQuantity = 24,
-                    CategoryId = catIoT.IdCategories,
-                    ProductImageUrl = "https://images.unsplash.com/photo-1517055729445-fa7d27394b48?w=800&auto=format&fit=crop&q=80"
-                },
-                new Product
-                {
-                    ProductName = "Shure MV7X XLR Podcast & Streaming Mic",
-                    ProductDescription = "Динамический микрофон с кардиоидной диаграммой направленности и технологией изоляции голоса. Идеальное решение для технических докладов, стримов и командных митингов.",
-                    ProductPrice = 21900.00m,
-                    ProductStockQuantity = 15,
-                    CategoryId = catAudio.IdCategories,
-                    ProductImageUrl = "https://images.unsplash.com/photo-1590602847861-f357a9332bbc?w=800&auto=format&fit=crop&q=80"
-                },
-                new Product
-                {
-                    ProductName = "Sony WH-1000XM5 Noise Cancelling Headphones",
-                    ProductDescription = "Флагманские полноразмерные наушники с лучшей в индустрии системой активного шумоподавления ANC, 30 часами автономной работы и комфортной посадкой для длительного кодинга.",
-                    ProductPrice = 36990.00m,
-                    ProductStockQuantity = 18,
-                    CategoryId = catAudio.IdCategories,
-                    ProductImageUrl = "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=800&auto=format&fit=crop&q=80"
-                },
-                new Product
-                {
-                    ProductName = "Ubiquiti UniFi Switch 8 PoE (60W Gigabit)",
-                    ProductDescription = "Управляемый гигабитный 8-портовый коммутатор с 4 портами 802.3af PoE. Централизованное управление через UniFi Controller для домашней лаборатории разработчика.",
-                    ProductPrice = 14800.00m,
-                    ProductStockQuantity = 9,
-                    CategoryId = catNetwork.IdCategories,
-                    ProductImageUrl = "https://images.unsplash.com/photo-1544197150-b99a580bb7a8?w=800&auto=format&fit=crop&q=80"
-                },
-                new Product
-                {
-                    ProductName = "Ergotron LX Dual Stacking Arm",
-                    ProductDescription = "Надежный настольный газлифтный кронштейн из полированного алюминия для независимого крепления двух мониторов весом до 9.1 кг каждый с возможностью портретной ориентации.",
-                    ProductPrice = 39900.00m,
-                    ProductStockQuantity = 6,
-                    CategoryId = catErgo.IdCategories,
-                    ProductImageUrl = "https://images.unsplash.com/photo-1593062096033-9a26b09da705?w=800&auto=format&fit=crop&q=80"
-                },
-                new Product
-                {
-                    ProductName = "Elgato Stream Deck MK.2 (15 LCD Keys)",
-                    ProductDescription = "Контроллер с 15 настраиваемыми ЖК-клавишами для запуска Docker-контейнеров, сборки проектов в CI/CD, переключения веток Git и автоматизации рутинных сценариев.",
-                    ProductPrice = 17500.00m,
-                    ProductStockQuantity = 14,
-                    CategoryId = catErgo.IdCategories,
-                    ProductImageUrl = "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&auto=format&fit=crop&q=80"
-                }
-            };
-
-            context.Products.AddRange(products);
-            context.SaveChanges();
-        }
+        context.SaveChanges();
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[DevShop Init Warning]: {ex.Message}");
+        Console.WriteLine($"[DevShop Init Error]: {ex.Message}");
     }
 }
 
-// Принудительный заголовок Content-Type для страниц Razor
+// 15. Middleware конвейер
 app.Use((context, next) => 
 { 
     if (!context.Request.Path.StartsWithSegments("/api") && !context.Request.Path.StartsWithSegments("/swagger"))
@@ -272,18 +347,17 @@ app.Use((context, next) =>
     return next(); 
 });
 
-// Middleware для Swagger UI
+// Swagger UI
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "DevHub Gear API v1");
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "DevShop API v1");
     c.RoutePrefix = "swagger";
 });
 
-// Режим обработки исключений
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Home/Error");
+    app.UseExceptionHandler("/Error");
     app.UseHsts();
 }
 
@@ -292,19 +366,19 @@ app.UseStaticFiles();
 
 app.UseRouting();
 
+// СТРОГИЙ ПОРЯДОК MIDDLEWARE: CORS ДО UseRateLimiter, UseAuthentication и UseAuthorization
+app.UseCors("FrontendCorsPolicy");
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseSession();
 
-// Регистрация эндпоинтов API (ProductsApiController)
 app.MapControllers();
 
-// Маршрут для административной зоны (Areas/Admin)
 app.MapControllerRoute(
     name: "admin",
-    pattern: "{area:exists}/{controller=Products}/{action=Index}/{id?}");
+    pattern: "{area:exists}/{controller=Home}/{action=Index}/{id?}");
 
-// Основной публичный маршрут (Каталог товаров)
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Products}/{action=Index}/{id?}");
@@ -312,3 +386,5 @@ app.MapControllerRoute(
 app.MapRazorPages();
 
 app.Run();
+
+public partial class Program { }

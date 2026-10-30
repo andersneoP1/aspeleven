@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using DevShop.Attributes;
 using Microsoft.AspNetCore.Mvc.ModelBinding.Validation;
 
@@ -22,8 +23,14 @@ public partial class User
     [Display(Name = "Роль")]
     public int RoleId { get; set; }
 
+    [Display(Name = "Активен")]
+    public bool IsActive { get; set; } = true;
+
     [Display(Name = "Дата регистрации")]
     public DateTime? UserCreatedAt { get; set; }
+
+    [NotMapped]
+    public string? Password { get; set; }
 
     [ValidateNever]
     public virtual Cart? Cart { get; set; }

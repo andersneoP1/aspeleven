@@ -1,13 +1,43 @@
-## Visual Studio / .NET Core gitignore
-bin/
-obj/
-*.user
-*.userosscache
+## Ignore Visual Studio temporary files, build results, and user-specific settings
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Re]leases/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+bld/
+[Bi]n/
+[Oo]bj/
+[Log]s/
+[Ff]ormats/
+
+# Visual Studio cache directory
+.vs/
+
+# User-specific files
+*.rsuser
 *.suo
+*.user
+*.usermd
+*.username
 *.userprefs
 *.db
 *.db-shm
 *.db-wal
-.vs/
-.idea/
-.vscode/
+
+# ASP.NET Core secrets and configurations
+appsettings.Development.json
+UserSecrets/
+secrets.json
+
+# Local History for Visual Studio Code
+.history/
+
+# Node / Frontend ignores
+node_modules/
+dist/
+.vite/
+*.local
